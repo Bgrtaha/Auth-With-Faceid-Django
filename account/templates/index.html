@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+{% load static %}
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>FaceID ile Oturum Kontrolü</title>
+    <link
+      href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.12.1/css/all.min.css"
+    />
+      {% block css_files %}
+    <link rel="stylesheet" href="{%static 'assets/css/style.css'%}">
+      {%endblock%}
+
+
+  </head>
+  <body>
+    <div class="container" id="appContainer">
+      <div class="video-container" id="videoContainer">
+        <video id="video" width="400" height="300" autoplay muted></video>
+        <span id="faceIDResult"></span>
+      </div>
+      <!-- Login Container -->
+      <div class="login-container face-id-active" id="loginContainer">
+        <div class="form-item w-100">
+          <p>Olası hesap çalınmalarının önüne geçmek amacıyla yüzünüzü tanımak isteriz. Yüzünüzü webcame yaklaştırın ve yüzünüzü tanımasını bekleyin.</p>
+        </div>
+        <div class="form-item w-100">
+            <p>(Lütfen kamera iznini verin ve aşağıdaki butona basın.)</p>
+        </div>
+        <div class="button-container w-100">
+
+          <button id="faceIdButton">
+            <i class="fa fa-camera"></i>
+            <span id="face-id-button-text">FaceID Kullan</span>
+          </button>
+        </div>
+
+        <div class="login-footer">
+          <img src="{%static 'assets/images/S-scanner-resim2.png'%}" style="width:50px;height: 50px" alt="" />
+        </div>
+      </div>
+      <!-- Footer -->
+      <div class="footer">
+        <span>S-Scanner | FaceID ile Oturum Kontrolü</span>
+      </div>
+    </div>
+    {% block js_files %}
+        <script src="{%static 'assets/js/face-api.min.js'%}"></script>
+        <script>
+                    // Başlangıc Tanımlamaları...
+            let loginButton = document.getElementById("loginButton");
+            let faceIdButton = document.getElementById("faceIdButton");
+            let loginContainer = document.getElementById("loginContainer");
+            let videoContainer = document.getElementById("videoContainer");
+            let appContainer = document.getElementById("appContainer");
+            let faceIDResult = document.getElementById("faceIDResult");
+
+            let isFaceIDActive = false;
+            faceIdButton.style.display = "none";
+
+            // FaceID için Gereken Kod Bloğu...
+            const video = document.getElementById("video");
+            let localStream = null;
+            let isModelsLoaded = false;
+            let LabeledFaceDescriptors = null;
+
+            // Modellerin yüklenmesi..
+            Promise.all([
+              faceapi.nets.tinyFaceDetector.loadFromUri('{% static "./models" %}'),
+              faceapi.nets.faceLandmark68Net.loadFromUri('{% static "./models" %}'),
+              faceapi.nets.faceRecognitionNet.loadFromUri('{% static "./models" %}'),
+              faceapi.nets.ssdMobilenetv1.loadFromUri('{% static "./models" %}')
+            ]).then(initApp);
+
+            // initApp
+            async function initApp() {
+              LabeledFaceDescriptors = await loadImages();
+              faceIdButton.style.display = "block";
+            }
+
+            function loadImages() {
+              const label = ["Gokhan"];
+
+              return Promise.all(
+                label.map(async label => {
+                  const descriptions = [];
+                    for (let i = 1; i <= 3; i++) {
+                        const img = await faceapi.fetchImage("/static/admins/Gokhan/"+i+".jpg")
+                        const detections = await faceapi
+                          .detectSingleFace(img)
+                          .withFaceLandmarks()
+                          .withFaceDescriptor()
+                        descriptions.push(detections.descriptor);
+                      }
+                  return new faceapi.LabeledFaceDescriptors(label, descriptions);
+                })
+              );
+            }
+
+            function startCamera() {
+              navigator.getUserMedia(
+                {
+                  video: {}
+                },
+                stream => {
+                  localStream = stream;
+                  video.srcObject = stream;
+                },
+                err => console.log(err)
+              );
+            }
+            function stopCamera() {
+              video.pause();
+              video.srcObject = null;
+              localStream.getTracks().forEach(track => {
+                track.stop();
+              });
+            }
+
+            // FaceID Kullan/Kullanma...
+            faceIdButton.addEventListener("click", () => {
+              isFaceIDActive = !isFaceIDActive;
+
+              if (isFaceIDActive) {
+                videoContainer.classList.add("faceIDShow");
+                loginContainer.classList.add("faceIDActive");
+                faceIdButton.classList.add("active");
+                appContainer.style.backgroundColor = "#666";
+                faceIdButton.lastElementChild.textContent = "FaceID Kullanma";
+                startCamera();
+              } else {
+                videoContainer.classList.remove("faceIDShow");
+                loginContainer.classList.remove("faceIDActive");
+                faceIdButton.classList.remove("active");
+                appContainer.style.backgroundColor = "#f4f4f4";
+                faceIdButton.lastElementChild.textContent = "FaceID Kullan";
+                faceIDResult.textContent = "";
+                faceIDResult.style.display = "none";
+                stopCamera();
+              }
+            });
+
+            video.addEventListener("play", async () => {
+              const boxSize = {
+                width: video.width,
+                height: video.height
+              };
+
+              let cameraInterval = setInterval(async () => {
+                const detections = await faceapi
+                  .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                  .withFaceLandmarks()
+                  .withFaceDescriptors();
+
+                const resizedDetections = faceapi.resizeResults(detections, boxSize);
+
+                const faceMatcher = new faceapi.FaceMatcher(LabeledFaceDescriptors, 0.6);
+
+                const results = resizedDetections.map(d =>
+                  faceMatcher.findBestMatch(d.descriptor)
+                );
+
+                if (
+                  results.length > 0 &&
+                  ["Gokhan", "Handan", "İlker", "Sado"].indexOf(results[0].label) > -1
+                ) {
+                  faceIDResult.textContent = "FaceID doğrulandı.. Yönlendiriliyorsunuz..";
+                  faceIDResult.classList = [];
+                  faceIDResult.classList.add("success");
+                  faceIDResult.style.display = "block";
+                  clearInterval(cameraInterval);
+                  setTimeout(() => {
+                     location.href = "http://127.0.0.1:8000/";
+                  }, 10000);
+                } else {
+                  faceIDResult.textContent = "FaceID doğrulanamadı...";
+                  faceIDResult.classList = [];
+                  faceIDResult.classList.add("error");
+                  faceIDResult.style.display = "block";
+                }
+              }, 100);
+            });
+
+        </script>
+    {% endblock %}
+  </body>
+</html>
